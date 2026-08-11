@@ -1,3 +1,6 @@
+# Purpose: Deploys regional workloads, Services, and ALB Ingresses to both EKS clusters.
+# Modules: None; these resources target the clusters created in eks.tf.
+
 resource "kubernetes_secret_v1" "primary_database" {
   provider = kubernetes.primary
 
@@ -22,6 +25,7 @@ resource "kubernetes_secret_v1" "secondary_database" {
   }
 }
 
+# The init probe blocks application startup until the global writer is usable.
 resource "kubernetes_deployment_v1" "primary" {
   provider = kubernetes.primary
 
@@ -79,6 +83,8 @@ resource "kubernetes_deployment_v1" "primary" {
   }
 }
 
+# The secondary probes write through the global endpoint, then wait until the
+# same row is visible through the local reader endpoint.
 resource "kubernetes_deployment_v1" "secondary" {
   provider = kubernetes.secondary
 
@@ -184,6 +190,7 @@ resource "kubernetes_service_v1" "secondary" {
   }
 }
 
+# Stable ALB names are the handoff contract with the separate edge state.
 resource "kubernetes_ingress_v1" "primary" {
   provider = kubernetes.primary
 

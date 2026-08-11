@@ -1,3 +1,6 @@
+# Purpose: Exposes regional network, cluster, ALB, and database values.
+# Modules: None; outputs include values produced by the VPC and EKS modules.
+
 output "primary_vpc_id" { value = module.primary_vpc.vpc_id }
 output "secondary_vpc_id" { value = module.secondary_vpc.vpc_id }
 output "primary_eks_cluster_name" { value = module.primary_eks.cluster_name }

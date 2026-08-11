@@ -1,3 +1,8 @@
+# Purpose: Attaches regional ALBs to Global Accelerator and publishes application DNS.
+# Modules: None; data sources and edge resources are declared directly.
+
+# Kubernetes Ingresses create these ALBs in the infrastructure stage; stable
+# names bridge that asynchronous step into this separate edge state.
 data "aws_lb" "primary" {
   provider = aws.primary
   name     = "${var.project_name}-primary"
@@ -32,6 +37,7 @@ resource "aws_globalaccelerator_listener" "web" {
   }
 }
 
+# Traffic dials shift new connections between regions without changing DNS.
 resource "aws_globalaccelerator_endpoint_group" "primary" {
   provider                = aws.primary
   listener_arn            = aws_globalaccelerator_listener.web.id

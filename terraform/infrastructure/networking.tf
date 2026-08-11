@@ -1,3 +1,6 @@
+# Purpose: Creates both regional VPCs and cross-region database connectivity.
+# Modules: Uses terraform-aws-modules/vpc/aws once per region.
+
 data "aws_availability_zones" "primary" {
   provider = aws.primary
   state    = "available"
@@ -64,6 +67,8 @@ module "secondary_vpc" {
   }
 }
 
+# Peering carries cross-region database traffic, including writes from the
+# secondary application to the current global writer.
 resource "aws_vpc_peering_connection" "primary_to_secondary" {
   provider    = aws.primary
   vpc_id      = module.primary_vpc.vpc_id
@@ -79,6 +84,8 @@ resource "aws_vpc_peering_connection_accepter" "secondary" {
   auto_accept               = true
 }
 
+# Remote DNS resolution keeps private Aurora endpoint names usable across the
+# peering connection.
 resource "aws_vpc_peering_connection_options" "primary" {
   provider                  = aws.primary
   vpc_peering_connection_id = aws_vpc_peering_connection_accepter.secondary.id

@@ -1,3 +1,6 @@
+# Purpose: Creates both EKS clusters and their AWS Load Balancer Controllers.
+# Modules: Uses terraform-aws-modules/eks/aws once per region.
+
 module "primary_eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.37.2"
@@ -62,6 +65,7 @@ module "secondary_eks" {
   }
 }
 
+# IAM is global, so one policy can be attached to the region-specific IRSA roles.
 resource "aws_iam_policy" "load_balancer_controller" {
   provider = aws.primary
   name     = "${var.project_name}-load-balancer-controller"

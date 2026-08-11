@@ -1,3 +1,6 @@
+# Purpose: Pins the AWS provider and configures the edge S3 backend and aliases.
+# Modules: None; the edge root declares only direct AWS resources.
+
 terraform {
   required_version = "= 1.15.8"
 

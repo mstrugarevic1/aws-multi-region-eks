@@ -1,3 +1,6 @@
+# Purpose: Pins providers, configures the S3 backend, and declares regional aliases.
+# Modules: None; module versions are pinned where each module is instantiated.
+
 terraform {
   required_version = "= 1.15.8"
 

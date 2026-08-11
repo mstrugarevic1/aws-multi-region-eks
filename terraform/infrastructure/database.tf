@@ -1,3 +1,6 @@
+# Purpose: Builds the two-region Aurora Global Database and access controls.
+# Modules: None; this file consumes database subnet outputs from the VPC modules.
+
 resource "aws_security_group" "primary_database" {
   provider    = aws.primary
   name_prefix = "${var.project_name}-primary-db-"
@@ -46,6 +49,8 @@ resource "aws_security_group" "secondary_database" {
   lifecycle { create_before_destroy = true }
 }
 
+# The primary and secondary regional clusters join this shared replication
+# topology as writer and read-only members, respectively.
 resource "aws_rds_global_cluster" "this" {
   provider                  = aws.primary
   global_cluster_identifier = var.project_name
@@ -88,6 +93,8 @@ resource "aws_rds_cluster" "primary" {
 resource "aws_secretsmanager_secret_version" "database" {
   provider  = aws.primary
   secret_id = aws_secretsmanager_secret.database.id
+
+  # The global endpoint follows the writer after a managed switchover or failover.
   secret_string = jsonencode({
     engine   = "postgres"
     host     = aws_rds_global_cluster.this.endpoint
@@ -120,6 +127,7 @@ resource "aws_rds_cluster" "secondary" {
   storage_encrypted         = true
   skip_final_snapshot       = true
 
+  # Aurora requires a provisioned primary instance before adding a secondary member.
   depends_on = [aws_rds_cluster_instance.primary]
 }
 

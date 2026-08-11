@@ -1,3 +1,6 @@
+# Purpose: Defines regional, DNS, and traffic-dial inputs for the edge layer.
+# Modules: None; these values configure direct AWS resources.
+
 variable "project_name" {
   type    = string
   default = "multi-region-lab"
@@ -47,4 +50,3 @@ variable "secondary_traffic_dial" {
     error_message = "secondary_traffic_dial must be between 0 and 100."
   }
 }
-

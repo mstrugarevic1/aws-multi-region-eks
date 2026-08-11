@@ -1,3 +1,6 @@
+# Purpose: Defines inputs shared by the regional infrastructure resources.
+# Modules: None; selected values are passed into the VPC and EKS modules.
+
 variable "project_name" {
   type        = string
   description = "Short lowercase name used in AWS resource names."
@@ -48,4 +51,3 @@ variable "db_username" {
   type    = string
   default = "appadmin"
 }
-
