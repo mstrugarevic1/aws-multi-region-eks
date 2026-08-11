@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+
+# Bootstrap the S3 backend shared by the infrastructure and edge Terraform roots.
+# Usage: ./scripts/bootstrap-backend.sh BUCKET_NAME [AWS_REGION]
+# AWS_REGION defaults to eu-central-1.
+# Requires an authenticated AWS CLI identity with S3 permissions.
+
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -8,8 +14,11 @@ fi
 
 bucket=$1
 region=${2:-eu-central-1}
+
+# Resolve the repository root so the output path is independent of the caller's directory.
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
+# Reuse an existing bucket; S3 requires a different creation request in us-east-1.
 if ! aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
   if [[ $region == us-east-1 ]]; then
     aws s3api create-bucket --bucket "$bucket" --region "$region" >/dev/null
@@ -21,6 +30,7 @@ if ! aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
   fi
 fi
 
+# Protect Terraform state with versioning, encryption, and public-access blocking.
 aws s3api put-bucket-versioning \
   --bucket "$bucket" \
   --versioning-configuration Status=Enabled
@@ -35,8 +45,8 @@ aws s3api put-public-access-block \
   --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
+# Write the ignored backend configuration shared by both Terraform roots.
 mkdir -p "$repo_dir/terraform/bootstrap"
 printf 'bucket = "%s"\nregion = "%s"\n' "$bucket" "$region" > "$repo_dir/terraform/bootstrap/backend.hcl"
 
 echo "Backend bucket ready: $bucket ($region)"
-
