@@ -1,0 +1,10 @@
+project_name       = "multi-region-lab"
+primary_region     = "eu-central-1"
+secondary_region   = "eu-west-1"
+primary_vpc_cidr   = "10.10.0.0/16"
+secondary_vpc_cidr = "10.20.0.0/16"
+domain_name        = "app.example.com"
+route53_zone_id    = "Z00000000000000000000"
+db_name            = "appdb"
+db_username        = "appadmin"
+

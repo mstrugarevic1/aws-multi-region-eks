@@ -1,0 +1,8 @@
+project_name           = "multi-region-lab"
+primary_region         = "eu-central-1"
+secondary_region       = "eu-west-1"
+domain_name            = "app.example.com"
+route53_zone_id        = "Z00000000000000000000"
+primary_traffic_dial   = 100
+secondary_traffic_dial = 0
+

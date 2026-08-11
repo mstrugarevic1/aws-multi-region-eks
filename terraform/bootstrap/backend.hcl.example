@@ -1,0 +1,3 @@
+bucket = "replace-with-a-globally-unique-bucket-name"
+region = "eu-central-1"
+
