@@ -54,7 +54,7 @@ resource "kubernetes_deployment_v1" "primary" {
           }
           env {
             name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_cluster.primary.endpoint
+            value = aws_rds_global_cluster.this.endpoint
           }
         }
 
@@ -67,7 +67,7 @@ resource "kubernetes_deployment_v1" "primary" {
 
           env {
             name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_cluster.primary.endpoint
+            value = aws_rds_global_cluster.this.endpoint
           }
           env {
             name  = "DB_READER_ENDPOINT"
@@ -96,7 +96,7 @@ resource "kubernetes_deployment_v1" "secondary" {
 
       spec {
         init_container {
-          name    = "primary-writer-check"
+          name    = "global-writer-check"
           image   = "postgres:16-alpine"
           command = ["/bin/sh", "-c"]
           args = [<<-EOT
@@ -111,7 +111,7 @@ resource "kubernetes_deployment_v1" "secondary" {
           }
           env {
             name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_cluster.primary.endpoint
+            value = aws_rds_global_cluster.this.endpoint
           }
         }
 
@@ -144,7 +144,7 @@ resource "kubernetes_deployment_v1" "secondary" {
 
           env {
             name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_cluster.primary.endpoint
+            value = aws_rds_global_cluster.this.endpoint
           }
           env {
             name  = "DB_READER_ENDPOINT"

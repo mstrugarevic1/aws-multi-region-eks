@@ -1,6 +1,6 @@
-# AWS Multi-Region EKS Setup
+# AWS Multi-Region EKS
 
-This repository contains a two-stage Terraform configuration for a multi-region AWS lab. The `infrastructure` stage defines regional networking, EKS clusters, application ingress, and an Aurora Global Database; the `edge` stage connects the regional ALBs to AWS Global Accelerator and Route53.
+This repository is a Terraform example and reference for deploying an application across multiple AWS regions with regional EKS clusters, Aurora Global Database, and AWS Global Accelerator. It illustrates patterns for regional availability, geographic distribution that keeps users closer to workloads, compliance or regulatory requirements, and disaster recovery.
 
 ## Architecture
 
@@ -96,22 +96,22 @@ The response is `region=primary` or `region=secondary`. Verify the database endp
 
 ```sh
 cd ../infrastructure
-terraform output aurora_primary_writer_endpoint
+terraform output aurora_global_writer_endpoint
 terraform output aurora_secondary_reader_endpoint
 aws secretsmanager describe-secret --region eu-central-1 --secret-id multi-region-lab/aurora-master --query ARN --output text
 ```
 
-Check TCP connectivity from the primary app network to the writer, and from the secondary app network to both its local reader and the primary writer:
+Check TCP connectivity from the primary app network to the global writer, and from the secondary app network to both its local reader and the global writer:
 
 ```sh
-PRIMARY_WRITER=$(terraform output -raw aurora_primary_writer_endpoint)
+GLOBAL_WRITER=$(terraform output -raw aurora_global_writer_endpoint)
 SECONDARY_READER=$(terraform output -raw aurora_secondary_reader_endpoint)
-kubectl --context primary run db-check --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$PRIMARY_WRITER" -p 5432
+kubectl --context primary run db-check --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$GLOBAL_WRITER" -p 5432
 kubectl --context secondary run db-check-reader --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$SECONDARY_READER" -p 5432
-kubectl --context secondary run db-check-writer --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$PRIMARY_WRITER" -p 5432
+kubectl --context secondary run db-check-writer --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$GLOBAL_WRITER" -p 5432
 ```
 
-The primary application's init container performs a read/write check against the primary writer. The secondary application's init containers write through the primary endpoint and wait until that row is readable from the local secondary reader. Credentials are stored in Secrets Manager and copied into Kubernetes Secrets; Aurora write forwarding is not enabled.
+The primary application's init container performs a read/write check against the global writer endpoint. The secondary application's init containers write through the global writer endpoint and wait until that row is readable from the local secondary reader. Credentials are stored in Secrets Manager and copied into Kubernetes Secrets; Aurora write forwarding is not enabled.
 
 ## 9. Test traffic-dial failover
 

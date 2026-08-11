@@ -90,7 +90,7 @@ resource "aws_secretsmanager_secret_version" "database" {
   secret_id = aws_secretsmanager_secret.database.id
   secret_string = jsonencode({
     engine   = "postgres"
-    host     = aws_rds_cluster.primary.endpoint
+    host     = aws_rds_global_cluster.this.endpoint
     port     = 5432
     dbname   = var.db_name
     username = var.db_username

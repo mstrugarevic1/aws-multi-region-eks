@@ -11,6 +11,5 @@ output "secondary_alb_dns_name" {
   value = try(kubernetes_ingress_v1.secondary.status[0].load_balancer[0].ingress[0].hostname, "pending-controller-reconciliation")
 }
 
-output "aurora_primary_writer_endpoint" { value = aws_rds_cluster.primary.endpoint }
+output "aurora_global_writer_endpoint" { value = aws_rds_global_cluster.this.endpoint }
 output "aurora_secondary_reader_endpoint" { value = aws_rds_cluster.secondary.reader_endpoint }
-

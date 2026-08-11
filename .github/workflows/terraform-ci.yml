@@ -1,0 +1,23 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+      - name: Validate
+        run: |
+          terraform fmt -check -recursive
+          terraform -chdir=terraform/infrastructure init -backend=false
+          terraform -chdir=terraform/infrastructure validate
+          terraform -chdir=terraform/edge init -backend=false
+          terraform -chdir=terraform/edge validate
+          bash -n scripts/bootstrap-backend.sh
