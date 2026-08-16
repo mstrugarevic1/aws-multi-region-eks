@@ -25,7 +25,20 @@ resource "kubernetes_secret_v1" "secondary_database" {
   }
 }
 
-# The init probe blocks application startup until the global writer is usable.
+resource "kubernetes_config_map_v1" "primary_application" {
+  provider = kubernetes.primary
+
+  metadata { name = "regional-test" }
+  data = { "application.sh" = file("${path.module}/application.sh") }
+}
+
+resource "kubernetes_config_map_v1" "secondary_application" {
+  provider = kubernetes.secondary
+
+  metadata { name = "regional-test" }
+  data = { "application.sh" = file("${path.module}/application.sh") }
+}
+
 resource "kubernetes_deployment_v1" "primary" {
   provider = kubernetes.primary
 
@@ -42,16 +55,13 @@ resource "kubernetes_deployment_v1" "primary" {
       metadata { labels = { app = "regional-test" } }
 
       spec {
-        init_container {
-          name    = "database-read-write-check"
+        container {
+          name    = "app"
           image   = "postgres:16-alpine"
-          command = ["/bin/sh", "-c"]
-          args = [<<-EOT
-            until psql -h "$DB_WRITER_ENDPOINT" -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS regional_probe (region text PRIMARY KEY, checked_at timestamptz NOT NULL); INSERT INTO regional_probe VALUES ('primary', now()) ON CONFLICT (region) DO UPDATE SET checked_at = excluded.checked_at; SELECT * FROM regional_probe WHERE region = 'primary';"; do
-              sleep 5
-            done
-          EOT
-          ]
+          command = ["/app/application.sh"]
+          args    = ["serve"]
+
+          port { container_port = 8080 }
 
           env_from {
             secret_ref { name = kubernetes_secret_v1.primary_database.metadata[0].name }
@@ -60,22 +70,61 @@ resource "kubernetes_deployment_v1" "primary" {
             name  = "DB_WRITER_ENDPOINT"
             value = aws_rds_global_cluster.this.endpoint
           }
-        }
-
-        container {
-          name  = "app"
-          image = "hashicorp/http-echo:1.0"
-          args  = ["-listen=:8080", "-text=region=primary"]
-
-          port { container_port = 8080 }
-
           env {
-            name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_global_cluster.this.endpoint
+            name  = "PGSSLMODE"
+            value = "require"
           }
           env {
-            name  = "DB_READER_ENDPOINT"
-            value = aws_rds_cluster.primary.reader_endpoint
+            name  = "REGION"
+            value = var.primary_region
+          }
+
+          readiness_probe {
+            http_get {
+              path   = "/readyz"
+              port   = 8080
+              scheme = "HTTP"
+            }
+            initial_delay_seconds = 2
+            period_seconds        = 5
+            timeout_seconds       = 3
+            failure_threshold     = 2
+          }
+
+          liveness_probe {
+            http_get {
+              path   = "/healthz"
+              port   = 8080
+              scheme = "HTTP"
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+            timeout_seconds       = 2
+            failure_threshold     = 3
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+            read_only_root_filesystem  = true
+            run_as_group               = 70
+            run_as_non_root            = true
+            run_as_user                = 70
+
+            capabilities { drop = ["ALL"] }
+          }
+
+          volume_mount {
+            name       = "application"
+            mount_path = "/app"
+            read_only  = true
+          }
+        }
+
+        volume {
+          name = "application"
+          config_map {
+            name         = kubernetes_config_map_v1.primary_application.metadata[0].name
+            default_mode = "0555"
           }
         }
       }
@@ -83,8 +132,6 @@ resource "kubernetes_deployment_v1" "primary" {
   }
 }
 
-# The secondary probes write through the global endpoint, then wait until the
-# same row is visible through the local reader endpoint.
 resource "kubernetes_deployment_v1" "secondary" {
   provider = kubernetes.secondary
 
@@ -101,60 +148,76 @@ resource "kubernetes_deployment_v1" "secondary" {
       metadata { labels = { app = "regional-test" } }
 
       spec {
-        init_container {
-          name    = "global-writer-check"
-          image   = "postgres:16-alpine"
-          command = ["/bin/sh", "-c"]
-          args = [<<-EOT
-            until psql -h "$DB_WRITER_ENDPOINT" -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS regional_probe (region text PRIMARY KEY, checked_at timestamptz NOT NULL); INSERT INTO regional_probe VALUES ('secondary', now()) ON CONFLICT (region) DO UPDATE SET checked_at = excluded.checked_at;"; do
-              sleep 5
-            done
-          EOT
-          ]
-
-          env_from {
-            secret_ref { name = kubernetes_secret_v1.secondary_database.metadata[0].name }
-          }
-          env {
-            name  = "DB_WRITER_ENDPOINT"
-            value = aws_rds_global_cluster.this.endpoint
-          }
-        }
-
-        init_container {
-          name    = "local-reader-check"
-          image   = "postgres:16-alpine"
-          command = ["/bin/sh", "-c"]
-          args = [<<-EOT
-            until psql -h "$DB_READER_ENDPOINT" -v ON_ERROR_STOP=1 -c "SELECT * FROM regional_probe WHERE region = 'secondary';" | grep -q secondary; do
-              sleep 5
-            done
-          EOT
-          ]
-
-          env_from {
-            secret_ref { name = kubernetes_secret_v1.secondary_database.metadata[0].name }
-          }
-          env {
-            name  = "DB_READER_ENDPOINT"
-            value = aws_rds_cluster.secondary.reader_endpoint
-          }
-        }
-
         container {
-          name  = "app"
-          image = "hashicorp/http-echo:1.0"
-          args  = ["-listen=:8080", "-text=region=secondary"]
+          name    = "app"
+          image   = "postgres:16-alpine"
+          command = ["/app/application.sh"]
+          args    = ["serve"]
 
           port { container_port = 8080 }
 
+          env_from {
+            secret_ref { name = kubernetes_secret_v1.secondary_database.metadata[0].name }
+          }
           env {
             name  = "DB_WRITER_ENDPOINT"
             value = aws_rds_global_cluster.this.endpoint
           }
           env {
-            name  = "DB_READER_ENDPOINT"
-            value = aws_rds_cluster.secondary.reader_endpoint
+            name  = "PGSSLMODE"
+            value = "require"
+          }
+          env {
+            name  = "REGION"
+            value = var.secondary_region
+          }
+
+          readiness_probe {
+            http_get {
+              path   = "/readyz"
+              port   = 8080
+              scheme = "HTTP"
+            }
+            initial_delay_seconds = 2
+            period_seconds        = 5
+            timeout_seconds       = 3
+            failure_threshold     = 2
+          }
+
+          liveness_probe {
+            http_get {
+              path   = "/healthz"
+              port   = 8080
+              scheme = "HTTP"
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+            timeout_seconds       = 2
+            failure_threshold     = 3
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+            read_only_root_filesystem  = true
+            run_as_group               = 70
+            run_as_non_root            = true
+            run_as_user                = 70
+
+            capabilities { drop = ["ALL"] }
+          }
+
+          volume_mount {
+            name       = "application"
+            mount_path = "/app"
+            read_only  = true
+          }
+        }
+
+        volume {
+          name = "application"
+          config_map {
+            name         = kubernetes_config_map_v1.secondary_application.metadata[0].name
+            default_mode = "0555"
           }
         }
       }
@@ -198,9 +261,10 @@ resource "kubernetes_ingress_v1" "primary" {
     name = "regional-test"
     annotations = {
       "alb.ingress.kubernetes.io/certificate-arn"    = aws_acm_certificate_validation.primary.certificate_arn
+      "alb.ingress.kubernetes.io/healthcheck-path"   = "/readyz"
       "alb.ingress.kubernetes.io/listen-ports"       = jsonencode([{ HTTP = 80 }, { HTTPS = 443 }])
       "alb.ingress.kubernetes.io/load-balancer-name" = "${var.project_name}-primary"
-      "alb.ingress.kubernetes.io/scheme"             = "internet-facing"
+      "alb.ingress.kubernetes.io/scheme"             = "internal"
       "alb.ingress.kubernetes.io/ssl-redirect"       = "443"
       "alb.ingress.kubernetes.io/target-type"        = "ip"
     }
@@ -235,9 +299,10 @@ resource "kubernetes_ingress_v1" "secondary" {
     name = "regional-test"
     annotations = {
       "alb.ingress.kubernetes.io/certificate-arn"    = aws_acm_certificate_validation.secondary.certificate_arn
+      "alb.ingress.kubernetes.io/healthcheck-path"   = "/readyz"
       "alb.ingress.kubernetes.io/listen-ports"       = jsonencode([{ HTTP = 80 }, { HTTPS = 443 }])
       "alb.ingress.kubernetes.io/load-balancer-name" = "${var.project_name}-secondary"
-      "alb.ingress.kubernetes.io/scheme"             = "internet-facing"
+      "alb.ingress.kubernetes.io/scheme"             = "internal"
       "alb.ingress.kubernetes.io/ssl-redirect"       = "443"
       "alb.ingress.kubernetes.io/target-type"        = "ip"
     }

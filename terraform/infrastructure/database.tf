@@ -28,15 +28,15 @@ resource "aws_security_group" "primary_database" {
 resource "aws_security_group" "secondary_database" {
   provider    = aws.secondary
   name_prefix = "${var.project_name}-secondary-db-"
-  description = "Aurora PostgreSQL access from the secondary application VPC"
+  description = "Aurora PostgreSQL access from both application VPCs"
   vpc_id      = module.secondary_vpc.vpc_id
 
   ingress {
-    description = "PostgreSQL from secondary application VPC"
+    description = "PostgreSQL from application VPCs"
     protocol    = "tcp"
     from_port   = 5432
     to_port     = 5432
-    cidr_blocks = [var.secondary_vpc_cidr]
+    cidr_blocks = [var.primary_vpc_cidr, var.secondary_vpc_cidr]
   }
 
   egress {
