@@ -4,17 +4,18 @@ This repository is a Terraform example and reference for deploying an applicatio
 
 ## Architecture
 
-![AWS multi-region EKS architecture](aws.png)
+![AWS Multi-Region EKS Architecture](aws.png)
 
 ## Notes
 
 The diagram shows the intended runtime flow:
 
-- AWS Global Accelerator routes traffic to regional ALB endpoints.
+- AWS Global Accelerator is the public entry point and routes traffic to regional internal ALB endpoints.
 - HTTP-to-HTTPS redirects happen on the ALBs.
-- ALB health is derived from target group health.
-- Reads can stay local in the secondary region.
-- Writes use the Aurora Global Database writer endpoint.
+- ALB target groups and Kubernetes readiness probes use the database-aware `/readyz` endpoint.
+- `/readyz` connects to the Aurora Global Database writer endpoint and verifies that the session is writable.
+- Cross-region VPC peering, routes, and database security groups let either EKS region reach the current writer.
+- Global Accelerator resources use a dedicated `us-west-2` AWS provider; the endpoint groups remain regional.
 
 ## 1. Prerequisites
 
@@ -45,6 +46,8 @@ Set the same `project_name`, regions, `domain_name`, and `route53_zone_id` in bo
 
 ## 4. Deploy infrastructure
 
+For an existing deployment with internet-facing ALBs, destroy the edge root before this apply and redeploy it in step 7 after the replacement internal ALBs are active.
+
 ```sh
 cd terraform/infrastructure
 terraform init -backend-config=../bootstrap/backend.hcl
@@ -63,13 +66,15 @@ kubectl --context secondary get nodes
 
 ## 6. Verify both ALBs
 
-Wait until each Ingress has an address and each ALB reports `active`:
+Wait until each Ingress has an address and each internal ALB reports `active`:
 
 ```sh
 kubectl --context primary get ingress regional-test
 kubectl --context secondary get ingress regional-test
-aws elbv2 describe-load-balancers --region eu-central-1 --names multi-region-lab-primary --query 'LoadBalancers[0].[State.Code,DNSName]'
-aws elbv2 describe-load-balancers --region eu-west-1 --names multi-region-lab-secondary --query 'LoadBalancers[0].[State.Code,DNSName]'
+kubectl --context primary get ingress regional-test -o go-template='{{index .metadata.annotations "alb.ingress.kubernetes.io/healthcheck-path"}}{{"\n"}}'
+kubectl --context secondary get ingress regional-test -o go-template='{{index .metadata.annotations "alb.ingress.kubernetes.io/healthcheck-path"}}{{"\n"}}'
+aws elbv2 describe-load-balancers --region eu-central-1 --names multi-region-lab-primary --query 'LoadBalancers[0].[Scheme,State.Code,DNSName]'
+aws elbv2 describe-load-balancers --region eu-west-1 --names multi-region-lab-secondary --query 'LoadBalancers[0].[Scheme,State.Code,DNSName]'
 terraform apply -refresh-only
 terraform output primary_alb_dns_name
 terraform output secondary_alb_dns_name
@@ -90,9 +95,11 @@ terraform apply
 terraform output global_accelerator_dns_name
 terraform output global_accelerator_static_ips
 curl -i https://app.example.com/
+curl -i https://app.example.com/healthz
+curl -i https://app.example.com/readyz
 ```
 
-The response is `region=primary` or `region=secondary`. Verify the database endpoints from the infrastructure root:
+The `/` response is `region=eu-central-1` or `region=eu-west-1` with the default regions. `/healthz` checks the application process; `/readyz` succeeds only when the current Aurora writer is reachable and writable. Verify the database endpoints from the infrastructure root:
 
 ```sh
 cd ../infrastructure
@@ -111,18 +118,39 @@ kubectl --context secondary run db-check-reader --rm -i --restart=Never --image=
 kubectl --context secondary run db-check-writer --rm -i --restart=Never --image=postgres:16-alpine -- pg_isready -h "$GLOBAL_WRITER" -p 5432
 ```
 
-The primary application's init container performs a read/write check against the global writer endpoint. The secondary application's init containers write through the global writer endpoint and wait until that row is readable from the local secondary reader. Credentials are stored in Secrets Manager and copied into Kubernetes Secrets; Aurora write forwarding is not enabled.
+Pod readiness probes and ALB target-group health checks call `/readyz`. The endpoint opens a TLS connection to the global writer and verifies that `transaction_read_only` is `off`. Credentials are stored in Secrets Manager and copied into Kubernetes Secrets; Aurora write forwarding is not enabled.
 
-## 9. Test traffic-dial failover
+## 9. Test traffic steering and failover
 
-In `terraform/edge/terraform.tfvars`, apply `100/0`, then `0/100`:
+To test manual traffic steering, change `100/0` to `0/100` in `terraform/edge/terraform.tfvars`:
 
 ```hcl
 primary_traffic_dial   = 0
 secondary_traffic_dial = 100
 ```
 
-Run `terraform plan` and `terraform apply`, then repeat the HTTPS request. `50/50` is also supported.
+Run `terraform plan` and `terraform apply`, then repeat the HTTPS request. `50/50` is also supported. Traffic dials affect new connections; they do not perform health checks.
+
+To test automatic health-based failover, apply `100/0`, then remove the primary ALB's healthy targets:
+
+```sh
+kubectl --context primary scale deployment regional-test --replicas=0
+until curl -fsS https://app.example.com/ | grep -q eu-west-1; do sleep 5; done
+kubectl --context primary scale deployment regional-test --replicas=2
+```
+
+After health checks converge, the response comes from the secondary region. Global Accelerator can use a healthy endpoint group whose normal traffic dial is `0` during failover.
+
+Aurora switchover is a separate operation. For a planned switchover to the secondary region:
+
+```sh
+SECONDARY_CLUSTER_ARN=$(aws rds describe-db-clusters --region eu-west-1 --db-cluster-identifier multi-region-lab-secondary --query 'DBClusters[0].DBClusterArn' --output text)
+aws rds switchover-global-cluster --region eu-west-1 --global-cluster-identifier multi-region-lab --target-db-cluster-identifier "$SECONDARY_CLUSTER_ARN"
+kubectl --context secondary get pods -l app=regional-test
+curl -i https://app.example.com/readyz
+```
+
+The global writer hostname remains unchanged and follows the promoted writer. Review the Terraform plan before any later apply or destroy after changing database roles.
 
 ## 10. Destroy
 
