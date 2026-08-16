@@ -41,3 +41,16 @@ provider "aws" {
     }
   }
 }
+
+# Global Accelerator exposes its control-plane API in us-west-2.
+provider "aws" {
+  alias  = "global"
+  region = "us-west-2"
+
+  default_tags {
+    tags = {
+      Project   = var.project_name
+      ManagedBy = "Terraform"
+    }
+  }
+}

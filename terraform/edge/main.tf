@@ -14,14 +14,14 @@ data "aws_lb" "secondary" {
 }
 
 resource "aws_globalaccelerator_accelerator" "this" {
-  provider        = aws.primary
+  provider        = aws.global
   name            = var.project_name
   enabled         = true
   ip_address_type = "IPV4"
 }
 
 resource "aws_globalaccelerator_listener" "web" {
-  provider        = aws.primary
+  provider        = aws.global
   accelerator_arn = aws_globalaccelerator_accelerator.this.id
   protocol        = "TCP"
   client_affinity = "NONE"
@@ -39,27 +39,27 @@ resource "aws_globalaccelerator_listener" "web" {
 
 # Traffic dials shift new connections between regions without changing DNS.
 resource "aws_globalaccelerator_endpoint_group" "primary" {
-  provider                = aws.primary
+  provider                = aws.global
   listener_arn            = aws_globalaccelerator_listener.web.id
   endpoint_group_region   = var.primary_region
   traffic_dial_percentage = var.primary_traffic_dial
 
   endpoint_configuration {
     endpoint_id                    = data.aws_lb.primary.arn
-    client_ip_preservation_enabled = false
+    client_ip_preservation_enabled = true
     weight                         = 100
   }
 }
 
 resource "aws_globalaccelerator_endpoint_group" "secondary" {
-  provider                = aws.primary
+  provider                = aws.global
   listener_arn            = aws_globalaccelerator_listener.web.id
   endpoint_group_region   = var.secondary_region
   traffic_dial_percentage = var.secondary_traffic_dial
 
   endpoint_configuration {
     endpoint_id                    = data.aws_lb.secondary.arn
-    client_ip_preservation_enabled = false
+    client_ip_preservation_enabled = true
     weight                         = 100
   }
 }
